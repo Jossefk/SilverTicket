@@ -13,8 +13,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Admin password (in production, this should be in environment variables)
-  const ADMIN_PASSWORD = 'admin123';
+  // Admin password sourced from environment variables (Vite)
+  const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? '';
 
   useEffect(() => {
     const authStatus = localStorage.getItem('ticketAppAuth');
@@ -25,6 +25,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = (password: string): boolean => {
+    if (!ADMIN_PASSWORD) {
+      // Env var is not set; for safety, deny login
+      return false;
+    }
     if (password === ADMIN_PASSWORD) {
       setIsAuthenticated(true);
       localStorage.setItem('ticketAppAuth', 'true');

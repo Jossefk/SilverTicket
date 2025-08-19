@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, MapPin, User, Mail, Phone, Ticket, Hash } from 'lucide-react';
+import { Calendar, MapPin, User, Mail, Phone, Ticket, Hash, CheckCircle, ExternalLink } from 'lucide-react';
+import PhoneInput from 'react-phone-number-input';
+import 'react-phone-number-input/style.css';
+import './PhoneInput.css';
 import { useTickets } from '../contexts/TicketContext';
 import { useEvent } from '../contexts/EventContext';
+import { useLocalTicket } from '../hooks/useLocalTicket';
 
 const TicketForm: React.FC = () => {
   const navigate = useNavigate();
-  const { addTicket } = useTickets();
+  const { addTicket, getTicketByEmail } = useTickets();
   const { eventInfo } = useEvent();
+  const { localTicket, saveLocalTicket, hasLocalTicket } = useLocalTicket();
   
   const [formData, setFormData] = useState({
     name: '',
@@ -21,6 +26,7 @@ const TicketForm: React.FC = () => {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   // Update form data when eventInfo changes (loaded from database)
   useEffect(() => {
@@ -41,10 +47,19 @@ const TicketForm: React.FC = () => {
     }));
   };
 
+  const handlePhoneChange = (value: string | undefined) => {
+    setFormData(prev => ({
+      ...prev,
+      phone: value || ''
+    }));
+    setPhoneError(null); // Limpiar error al cambiar
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
+    setPhoneError(null);
 
     try {
       const age = parseInt(formData.age, 10);
@@ -54,18 +69,58 @@ const TicketForm: React.FC = () => {
         setError('Por favor ingresa una edad válida (1-120 años)');
         return;
       }
+
+      // Validate phone number
+      if (!formData.phone) {
+        setPhoneError('Por favor ingresa un número de teléfono');
+        return;
+      }
+      
+      // Remove spaces and special characters for validation
+      const cleanPhone = formData.phone.replace(/\s+/g, '').replace(/[^\d+]/g, '');
+      if (cleanPhone.length < 8) {
+        setPhoneError('El número de teléfono debe tener al menos 8 dígitos');
+        return;
+      }
       
       const ticketData = {
         ...formData,
         age: age
       };
       const ticketId = await addTicket(ticketData);
+      
+      // Guardar el ticket en localStorage para acceso futuro
+      const newTicket = {
+        id: ticketId,
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        age: age,
+        eventName: formData.eventName,
+        eventDate: formData.eventDate,
+        eventLocation: formData.eventLocation,
+        createdAt: new Date().toISOString(),
+        checkedIn: false,
+      };
+      saveLocalTicket(newTicket);
+      
       navigate(`/ticket/${ticketId}`);
     } catch (error) {
       if (error instanceof Error) {
         // Check if it's an existing ticket error
         if (error.message.startsWith('EXISTING_TICKET:')) {
           const existingTicketId = error.message.split(':')[1];
+          
+          // Obtener el ticket existente y guardarlo en localStorage
+          try {
+            const existingTicket = await getTicketByEmail(formData.email);
+            if (existingTicket) {
+              saveLocalTicket(existingTicket);
+            }
+          } catch (fetchError) {
+            console.error('Error fetching existing ticket:', fetchError);
+          }
+          
           navigate(`/ticket/${existingTicketId}`);
           return;
         }
@@ -81,6 +136,28 @@ const TicketForm: React.FC = () => {
 
   return (
     <div className="max-w-2xl mx-auto">
+      {/* Banner de ticket existente */}
+      {hasLocalTicket() && localTicket && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+          <div className="flex items-center gap-3">
+            <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="text-green-800 font-semibold">Ya tienes un ticket registrado</h3>
+              <p className="text-green-700 text-sm">
+                {localTicket.name} - {localTicket.email}
+              </p>
+            </div>
+            <button
+              onClick={() => navigate(`/ticket/${localTicket.id}`)}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Ver mi ticket
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="text-center mb-6 sm:mb-8">
         {eventInfo?.logoUrl ? (
           <div className="w-16 h-16 sm:w-20 sm:h-20 bg-white rounded-full shadow-lg flex items-center justify-center mx-auto mb-4 overflow-hidden border-4 border-blue-100">
@@ -198,17 +275,18 @@ const TicketForm: React.FC = () => {
               Teléfono *
             </label>
             <div className="relative">
-              <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-gray-400" />
-              <input
-                type="tel"
-                id="phone"
-                name="phone"
+            <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-gray-400" />
+              <PhoneInput
+                international
+                defaultCountry="VE"
                 value={formData.phone}
-                onChange={handleChange}
-                required
-                className="w-full pl-9 sm:pl-10 pr-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm sm:text-base"
-                placeholder="+58 424 1234 567"
+                onChange={handlePhoneChange}
+                placeholder="Ingresa tu número de teléfono"
+                error={phoneError ? 'Número inválido' : undefined}
               />
+              {phoneError && (
+                <p className="text-red-600 text-xs mt-1">{phoneError}</p>
+              )}
             </div>
           </div>
 
